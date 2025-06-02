@@ -160,13 +160,14 @@ def is_valid_table_variable_declaration(sql: str, start_pos: int) -> bool:
     return close_paren != -1
 
 
-def parse_cte_definitions(sql: str, start_pos: int, nested: bool = False) -> List[Dict[str, Any]]:
+def parse_cte_definitions(sql: str, start_pos: int, parsing_issues: List[Dict[str, Any]], nested: bool = False) -> List[Dict[str, Any]]:
     """
     Parse CTE definitions starting from a WITH keyword.
     
     Args:
         sql: The SQL string
         start_pos: Position after the WITH keyword
+        parsing_issues: List to store parsing issues
         nested: Whether this is a nested CTE (inside a subquery)
         
     Returns:
@@ -191,6 +192,12 @@ def parse_cte_definitions(sql: str, start_pos: int, nested: bool = False) -> Lis
         # Find the matching closing parenthesis
         close_paren = find_balanced_parentheses(sql, name_end)
         if close_paren == -1:
+            parsing_issues.append({
+                'type': 'warning',
+                'message': f"Could not find closing parenthesis for CTE {cte_name}",
+                'component_name': cte_name,
+                'position': name_end
+            })
             logger.warning(f"Could not find closing parenthesis for CTE {cte_name}")
             break
             
@@ -227,7 +234,7 @@ def parse_cte_definitions(sql: str, start_pos: int, nested: bool = False) -> Lis
     return ctes
 
 
-def extract_components(sql: str, include_subqueries: bool = False) -> List[Dict[str, Any]]:
+def extract_components(sql: str, include_subqueries: bool = False) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
     """
     Extract SQL components from a SQL string.
     
@@ -236,10 +243,14 @@ def extract_components(sql: str, include_subqueries: bool = False) -> List[Dict[
         include_subqueries: Whether to include subquery extraction
         
     Returns:
-        List of components, each with 'type', 'name', and other attributes
+        A tuple containing:
+            - List of components, each with 'type', 'name', and other attributes
+            - List of parsing issues encountered
     """
     logger.info("SQLPARSE_V3_IMPL_FIX_IDENTIFIERLIST: Starting component extraction...")
     
+    parsing_issues = []
+
     # Remove comments first
     clean_sql = remove_comments(sql)
     
@@ -283,7 +294,7 @@ def extract_components(sql: str, include_subqueries: bool = False) -> List[Dict[
             # This is a nested WITH, skip it for regular CTE extraction
             continue
             
-        cte_components = parse_cte_definitions(clean_sql, match.end())
+        cte_components = parse_cte_definitions(clean_sql, match.end(), parsing_issues)
         components.extend(cte_components)
     
     # 3. Extract CREATE TABLE for temp tables with full declaration
@@ -347,7 +358,7 @@ def extract_components(sql: str, include_subqueries: bool = False) -> List[Dict[
     logger.info(f"SQLPARSE_V3_IMPL_FIX_IDENTIFIERLIST: Total components extracted: {len(components)}")
     logger.debug(f"SQLPARSE_V3_IMPL_FIX_IDENTIFIERLIST: Final Components: {components}")
     
-    return components
+    return components, parsing_issues
 
 
 def generate_component_queries(components: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
