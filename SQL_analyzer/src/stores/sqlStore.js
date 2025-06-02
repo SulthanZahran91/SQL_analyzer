@@ -1,6 +1,7 @@
 // src/stores/sqlStore.js
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
+import { useLogStore } from './logStore' // Import logStore
 
 // API configuration
 const API_BASE_URL = 'http://localhost:8000'
@@ -59,6 +60,14 @@ export const useSqlStore = defineStore('sql', () => {
         results.value = response.formatted_results
         statistics.value = response.statistics
         componentsCount.value = response.statistics.total
+
+        // Log parsing issues
+        if (response.parsing_issues && response.parsing_issues.length > 0) {
+          const logStore = useLogStore()
+          response.parsing_issues.forEach(issue => {
+            logStore.addLog(issue.type.toUpperCase(), issue.message)
+          })
+        }
       } else {
         // Handle API error response
         throw new Error(response.message || 'Processing failed')
