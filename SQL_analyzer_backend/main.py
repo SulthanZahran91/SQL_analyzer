@@ -54,6 +54,12 @@ class Component(BaseModel):
     content: Optional[str] = Field(None, description="The actual SQL content of the component", example="SELECT * FROM users")
     declaration: Optional[str] = Field(None, description="Full declaration for table variables/temp tables", example="DECLARE @TempUsers TABLE (UserID INT)")
 
+class ParsingIssueItem(BaseModel):
+    type: str = Field(..., description="Type of the parsing issue (e.g., warning, error)")
+    message: str = Field(..., description="Detailed message of the issue")
+    component_name: Optional[str] = Field(None, description="Name of the component related to the issue")
+    position: Optional[int] = Field(None, description="Position in the SQL string where the issue occurred")
+
 class Query(BaseModel):
     name: str = Field(..., description="Query name, often derived from the component name", example="UserCTE_Query")
     query: str = Field(..., description="Generated SQL query for this specific component", example="SELECT * FROM UserCTE;")
@@ -198,15 +204,26 @@ async def process_sql(request: SqlProcessRequest):
                 components=[],
                 queries=[],
                 statistics=Statistics(total=0, breakdown={}),
-                formatted_results=f"Error: {error_message}"
+                formatted_results=f"Error: {error_message}",
+                parsing_issues=[]
             )
         
         # Extract components using the SQL parser
-        raw_components = extract_components(
+        raw_components, parsing_issues_raw = extract_components(
             request.sql_query, 
             include_subqueries=request.include_subqueries
         )
         
+        # Convert raw parsing issues to Pydantic models
+        parsing_issues_response: List[ParsingIssueItem] = []
+        for issue_raw in parsing_issues_raw:
+            parsing_issues_response.append(ParsingIssueItem(
+                type=issue_raw.get('type', 'unknown'),
+                message=issue_raw.get('message', 'No message'),
+                component_name=issue_raw.get('component_name'),
+                position=issue_raw.get('position')
+            ))
+
         # Convert to Pydantic models
         components = []
         for comp in raw_components:
@@ -242,7 +259,8 @@ async def process_sql(request: SqlProcessRequest):
             components=components,
             queries=queries,
             statistics=statistics,
-            formatted_results=formatted_results
+            formatted_results=formatted_results,
+            parsing_issues=parsing_issues_response
         )
         
     except Exception as e:
@@ -256,7 +274,8 @@ async def process_sql(request: SqlProcessRequest):
             components=[],
             queries=[],
             statistics=Statistics(total=0, breakdown={}),
-            formatted_results=f"Error: {str(e)}"
+            formatted_results=f"Error: {str(e)}",
+            parsing_issues=[]
         )
 
 @app.post(
